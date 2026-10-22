@@ -1,0 +1,7 @@
+name: astrbot_plugin_jiehua
+display_name: 接话
+desc: 连续文本消息等待与合并、收尾静默和上下文衔接。齿轮中可配置各开关、等待时间及费用边界。
+version: 1.0.0
+author: KujouVan
+astrbot_version: '>=4.29.1'
+repo: https://github.com/KujouVan/astrbot_plugin_jiehua
