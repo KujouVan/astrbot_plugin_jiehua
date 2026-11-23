@@ -3,12 +3,15 @@ import re
 DEFAULTS = dict(enabled=True, wait_for_followup=True, wait_seconds=8,
                 fast_questions=True, timeout_reply=True, clarify_incomplete=True,
                 respect_wait=True, quiet_closing=True, update_unsent=False,
-                context_linking=True, max_wait_seconds=30)
+                context_linking=True, max_wait_seconds=30,
+                group_followup_enabled=True, group_followup_seconds=120,
+                question_wait_seconds=2)
 
 
 def options(config):
     result = {key: config.get(key, value) for key, value in DEFAULTS.items()}
-    for key, low, high in [('wait_seconds', 1, 30), ('max_wait_seconds', 8, 120)]:
+    for key, low, high in [('wait_seconds', 1, 30), ('max_wait_seconds', 8, 120),
+                          ('group_followup_seconds', 15, 600), ('question_wait_seconds', 0, 8)]:
         try:
             result[key] = min(high, max(low, float(result[key])))
         except (ValueError, TypeError):
@@ -45,7 +48,7 @@ def decision(text, config):
     if not config['wait_for_followup']:
         return 'reply', 0
     if kind == 'question' and config['fast_questions']:
-        return 'reply', 0
+        return 'reply', config['question_wait_seconds']
     return kind, config['wait_seconds']
 
 

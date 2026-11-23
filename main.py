@@ -2,7 +2,7 @@ import asyncio
 import time
 from dataclasses import dataclass, field
 
-from astrbot.api import AstrBotConfig
+from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.message_components import Plain, At
 from astrbot.api.star import Context, Star, register
@@ -29,7 +29,7 @@ class Run:
     sent: bool = False
 
 
-@register('astrbot_plugin_jiehua', 'KujouVan', '接话：连续发言等待与上下文衔接，不增加判断模型调用', '1.0.0')
+@register('astrbot_plugin_jiehua', 'local', '接话：连续发言等待与上下文衔接，不增加判断模型调用', '1.1.0')
 class JiehuaPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -37,10 +37,35 @@ class JiehuaPlugin(Star):
         self.pending = {}
         self.held = {}
         self.runs = {}
+        self.group_sessions = {}
         self.closed = False
 
     def key(self, event):
         return (event.unified_msg_origin, str(event.get_sender_id()))
+
+    def track_group_conversation(self, event, cfg):
+        if event.get_platform_name() != 'aiocqhttp' or not event.get_group_id():
+            return
+        if not cfg['group_followup_enabled']:
+            return
+        key = self.key(event)
+        now = time.monotonic()
+        # Do not hijack messages explicitly addressing a different group member.
+        if any(isinstance(c, At) and str(c.qq) != str(event.get_self_id()) for c in event.get_messages()):
+            self.group_sessions.pop(key, None)
+            return
+        if event.is_at_or_wake_command:
+            self.group_sessions[key] = (now, now + cfg['group_followup_seconds'])
+        else:
+            window = self.group_sessions.get(key)
+            if not window or now > window[1] or now - window[0] > 600:
+                self.group_sessions.pop(key, None)
+                return
+            event.is_wake = True
+            event.is_at_or_wake_command = True
+            event.set_extra('_jiehua_group_followup', True)
+            self.group_sessions[key] = (window[0], min(window[0] + 600, now + cfg['group_followup_seconds']))
+            logger.info('[接话] 已接入同一群友的免@续聊')
 
     def eligible(self, event):
         if event.get_platform_name() != 'aiocqhttp' or not event.is_at_or_wake_command:
@@ -59,15 +84,21 @@ class JiehuaPlugin(Star):
         now = time.monotonic()
         self.held = {k: v for k, v in self.held.items() if now-v[0] < 600}
         self.runs = {k: v for k, v in self.runs.items() if now-v.created < 600}
+        self.group_sessions = {k: v for k, v in self.group_sessions.items() if now < v[1]}
+        if len(self.group_sessions) > 500:
+            self.group_sessions.pop(next(iter(self.group_sessions)))
         if len(self.held) > 500:
             self.held.pop(next(iter(self.held)))
 
     @filter.event_message_type(filter.EventMessageType.ALL, priority=1000000000)
     async def receive(self, event: AstrMessageEvent):
         cfg = options(self.config)
-        if self.closed or not cfg['enabled'] or not self.eligible(event):
+        if self.closed or not cfg['enabled']:
             return
         self.prune()
+        self.track_group_conversation(event, cfg)
+        if not self.eligible(event):
+            return
         key = self.key(event)
         text = event.get_message_str().strip()
         now = time.monotonic()
@@ -97,6 +128,8 @@ class JiehuaPlugin(Star):
         self.pending[key] = batch
         event.set_extra('_jiehua_carry', carry)
         kind, delay = decision(text, cfg)
+        if kind == 'closing':
+            self.group_sessions.pop(key, None)
         if force_flush and kind not in ('closing', 'defer'):
             delay = 0
         delay = min(delay, max(0, cfg['max_wait_seconds']-(now-first)))
@@ -113,7 +146,8 @@ class JiehuaPlugin(Star):
         event.set_extra('_jiehua_texts', texts)
         if not self.closed and self.config.get('enabled', True):
             if kind in ('closing', 'defer') or (cfg['wait_for_followup'] and kind != 'reply' and not cfg['timeout_reply']):
-                self.held[key] = (time.monotonic(), texts, carry)
+                if kind != 'closing':
+                    self.held[key] = (time.monotonic(), texts, carry)
                 event.stop_event()
                 return
             if kind == 'incomplete' and not cfg['clarify_incomplete']:
@@ -170,6 +204,14 @@ class JiehuaPlugin(Star):
         run = event.get_extra('_jiehua_run')
         if run:
             run.sent = True
+        cfg = options(self.config)
+        if (cfg['enabled'] and cfg['group_followup_enabled'] and event.get_group_id()
+                and event.get_platform_name() == 'aiocqhttp'
+                and (event.is_at_or_wake_command or event.get_extra('_enhance_active_reply_triggered', False))):
+            key = self.key(event)
+            now = time.monotonic()
+            start = self.group_sessions.get(key, (now, now))[0]
+            self.group_sessions[key] = (start, min(start + 600, now + cfg['group_followup_seconds']))
 
     async def terminate(self):
         self.closed = True

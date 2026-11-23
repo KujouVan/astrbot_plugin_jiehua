@@ -2,7 +2,7 @@
   "enabled": {
     "description": "启用接话",
     "type": "bool", "default": true,
-    "hint": "只处理 QQ / OneBot 已唤醒的纯文本对话。同一会话、同一发送者才会合并。图片、语音、引用消息和 / ! 指令不参与合并。与识君独立，关闭不改变人物关系。"
+    "hint": "处理 QQ / OneBot 对话。群聊 @ 一次后，同一人的短时间连续发言可免 @ 续聊。同一会话、同一发送者才会合并；图片、语音、引用消息和 / ! 指令不参与文本合并。与识君独立。"
   },
   "wait_for_followup": {
     "description": "等待连续发言",
@@ -15,9 +15,21 @@
     "hint": "默认 8 秒。短一些回复更快，但慢打字更容易被打断；长一些更容易收齐发言。此时间是开始模型生成前的等待，不包含模型本身耗时。明确问题可由下一项开关直接放行。"
   },
   "fast_questions": {
-    "description": "明确问题立即处理",
+    "description": "明确问题使用短等待",
     "type": "bool", "default": true,
-    "hint": "以问号结尾，或以怎么、如何、为什么、帮我等开头的文本，跳过等待。降低延迟，但标点和关键词不能保证用户已经说完；经常分条提问时可关闭。不增加模型判断调用。"
+    "hint": "问句按“问句短等待秒数”等待补充，默认 2 秒；关闭则沿用普通等待。设置为 0 可恢复立即处理。"
+  },
+  "question_wait_seconds": {
+    "description": "问句短等待秒数", "type": "int", "default": 2,
+    "hint": "范围 0—8 秒。避免问题刚发出就开始回答、漏掉紧接着的补充。"
+  },
+  "group_followup_enabled": {
+    "description": "群聊 @ 后允许免 @ 续聊", "type": "bool", "default": true,
+    "hint": "窗口按群和发言者分别记录，其他人不会借用。对方 @ 其他人或明确收尾后结束；窗口最长持续 10 分钟。"
+  },
+  "group_followup_seconds": {
+    "description": "群聊连续对话窗口（秒）", "type": "int", "default": 120,
+    "hint": "默认 120 秒无互动后结束；范围 15—600 秒。实际互动会延长短窗口，最长不超过 10 分钟。"
   },
   "timeout_reply": {
     "description": "等待超时后回复",
